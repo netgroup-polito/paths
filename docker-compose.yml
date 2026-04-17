@@ -1,0 +1,14 @@
+services:
+  paths:
+    build: .
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app
+      - /app/venv
+    container_name: paths-app
+    restart: unless-stopped

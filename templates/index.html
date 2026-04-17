@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en" style="height: 100%; overflow: hidden;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prolog Path Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #ffffff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="upload_page" style="display: flex; height: 100vh;">
+        <div class="upload-gradient" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px;">
+            <div class="upload-card">
+                <h1 class="upload-title">PATHS</h1>
+                <p class="upload-subtitle">Upload your Prolog files to discover security vulnerabilities</p>
+                
+                <div class="file-input-group">
+                    <label class="file-label">
+                        Use Case File
+                        <span class="required-badge">REQUIRED</span>
+                    </label>
+                    <div class="custom-file-input">
+                        <input type="file" id="use_case_file" accept=".p,.pl,.prolog">
+                        <label for="use_case_file" class="file-input-label" id="use_case_label">
+                            <div class="file-info">
+                                <div class="file-icon">📄</div>
+                                <div class="file-text">
+                                    <p class="file-name" id="use_case_name" style="display: none;"></p>
+                                    <p class="file-placeholder" id="use_case_placeholder">Click to browse or drag file here</p>
+                                </div>
+                            </div>
+                            <span class="browse-btn">Browse</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <button id="upload_btn" class="upload-button">
+                    <span style="position: relative; z-index: 1;">🚀 Analyze Paths</span>
+                </button>
+                
+                <div id="upload_status" style="margin-top: 20px; text-align: center; min-height: 20px; font-size: 13px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="main_page" style="display: none; height: 100vh; flex-direction: column; background: linear-gradient(135deg, #0a0a0f 0%, #1a0a2e 50%, #16213e 100%); position: relative;">
+        <div style="position: absolute; width: 100%; height: 100%; pointer-events: none; background: radial-gradient(circle at 20% 50%, rgba(139, 92, 246, 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(217, 70, 239, 0.08) 0%, transparent 50%);"></div>
+        
+        <header class="main-header" style="position: relative; z-index: 1;">
+            <div class="header-content">
+                <h1 class="header-title">PATHS</h1>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button id="search_btn" class="reload-button" style="background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);">
+                    <span>🔍</span>
+                    <span>Search</span>
+                </button>
+                <button id="reload_btn" class="reload-button">
+                    <span>📤</span>
+                    <span>Upload New</span>
+                </button>
+            </div>
+        </header>
+
+        <div style="display: flex; flex: 1; overflow: hidden; position: relative; z-index: 1;">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h3 class="sidebar-title">Derived Facts</h3>
+                    <div class="tab-buttons">
+                        <button class="tab-btn active" data-tab="vulnerabilities">Vulns</button>
+                        <button class="tab-btn" data-tab="compromises">Comps</button>
+                        <button class="tab-btn" data-tab="malfunctions">Malfun</button>
+                    </div>
+                </div>
+
+                <div class="facts-container" id="facts_container">
+                    <div id="vuln_list" class="facts-list" style="display: block;"></div>
+                    <div id="comp_list" class="facts-list" style="display: none;"></div>
+                    <div id="mal_list" class="facts-list" style="display: none;"></div>
+                </div>
+            </div>
+
+            <div class="graph-container-main">
+                <div id="graph_area" class="graph-area">
+                    <div class="graph-placeholder">
+                        <p>Select a fact from the left to visualize</p>
+                    </div>
+                </div>
+                <div id="graph_status" class="status-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="search_modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; padding: 40px; overflow: auto;">
+        <div style="max-width: 1200px; margin: auto; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-radius: 16px; padding: 32px; position: relative; width: 100%;">
+            <button id="close_search" style="position: absolute; top: 20px; right: 20px; background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid #ef4444; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                ✕ Close
+            </button>
+            <h2 style="color: #06b6d4; margin: 0 0 24px 0; font-size: 28px;">🔍 Query the Prolog Database</h2>
+            
+            <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                <input id="search_input" type="text" placeholder="Enter Prolog query (e.g., canbeVul(E, V))" style="flex: 1; padding: 12px 16px; border: 2px solid #06b6d4; border-radius: 8px; background: rgba(6, 182, 212, 0.1); color: #e2e8f0; font-size: 14px;">
+                <button id="search_execute_btn" style="padding: 12px 24px; background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">
+                    Execute Query
+                </button>
+            </div>
+            
+            <div id="search_results" style="min-height: 100px; background: rgba(6, 182, 212, 0.1); border: 1px solid #06b6d4; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+                <div style="text-align: center; color: #94a3b8; padding: 40px; font-size: 14px;">
+                    Enter a query and click "Execute Query" to search
+                </div>
+            </div>
+            
+            <div id="search_visualization" style="min-height: 300px; background: rgba(6, 182, 212, 0.05); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 8px; padding: 16px; display: none;">
+                <div id="search_graph_container" style="width: 100%; height: 500px; background: rgba(15, 23, 42, 0.8); border-radius: 8px; overflow: hidden;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-cose-bilkent/4.1.0/cytoscape-cose-bilkent.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
