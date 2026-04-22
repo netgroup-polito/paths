@@ -29,7 +29,16 @@
                 <h1 class="upload-title">PATHS</h1>
                 <p class="upload-subtitle">Upload your Prolog files to discover security vulnerabilities</p>
                 
-                <div class="file-input-group">
+                <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                    <button id="mode_prolog_btn" class="upload-button" style="flex: 1; padding: 10px; font-size: 13px; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);">
+                        📄 Prolog File (.p)
+                    </button>
+                    <button id="mode_json_btn" class="upload-button" style="flex: 1; padding: 10px; font-size: 13px; background: rgba(30,30,45,0.6); border: 1px solid #4b5563;">
+                        🔧  SCG (.json)
+                    </button>
+                </div>
+
+                <div id="prolog_input_group" class="file-input-group">
                     <label class="file-label">
                         Use Case File
                         <span class="required-badge">REQUIRED</span>
@@ -42,6 +51,26 @@
                                 <div class="file-text">
                                     <p class="file-name" id="use_case_name" style="display: none;"></p>
                                     <p class="file-placeholder" id="use_case_placeholder">Click to browse or drag file here</p>
+                                </div>
+                            </div>
+                            <span class="browse-btn">Browse</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="json_input_group" class="file-input-group" style="display: none;">
+                    <label class="file-label">
+                        ctxd-v2.0 JSON File
+                        <span class="required-badge">REQUIRED</span>
+                    </label>
+                    <div class="custom-file-input">
+                        <input type="file" id="json_file" accept=".json">
+                        <label for="json_file" class="file-input-label" id="json_file_label">
+                            <div class="file-info">
+                                <div class="file-icon">🔧</div>
+                                <div class="file-text">
+                                    <p class="file-name" id="json_file_name" style="display: none;"></p>
+                                    <p class="file-placeholder" id="json_file_placeholder">Click to browse or drag file here</p>
                                 </div>
                             </div>
                             <span class="browse-btn">Browse</span>

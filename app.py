@@ -1,10 +1,15 @@
 import os
 import io
 import re
+import sys
+import json
 import base64
 import tempfile
 import shutil
 import atexit
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'parser'))
+from parser import build_name_registry, collect_entities, process_links, write_prolog
 
 import matplotlib
 matplotlib.use('Agg')
@@ -19,7 +24,7 @@ from werkzeug.utils import secure_filename
 from pyswip import Prolog
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024
 app.config['STATIC_RULES_FILE'] = os.path.join(
     os.path.dirname(__file__), 'static', 'prolog_files', 'rule.p'
 )
@@ -397,6 +402,58 @@ def upload_files():
     
     except Exception as e:
         return jsonify({'success': False, 'message': f"Upload error: {str(e)}"}), 500
+
+
+@app.route('/api/parse-json', methods=['POST', 'OPTIONS'])
+def parse_json():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    if 'json_file' not in request.files:
+        return jsonify({'success': False, 'message': 'json_file required'}), 400
+
+    json_file = request.files['json_file']
+    if not json_file.filename:
+        return jsonify({'success': False, 'message': 'No file selected'}), 400
+
+    try:
+        data = json.load(json_file)
+    except json.JSONDecodeError as e:
+        return jsonify({'success': False, 'message': f'Invalid JSON: {e}'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Read error: {e}'}), 400
+
+    try:
+        services = data.get('services', [])
+        links = data.get('links', [])
+
+        registry = build_name_registry(services, links)
+        entity_ids, _ = collect_entities(services, registry)
+        relations = process_links(links, registry)
+
+        temp_dir = app.config['TEMP_UPLOAD_DIR']
+        base_name = secure_filename(json_file.filename or 'parsed')
+        if base_name.endswith('.json'):
+            base_name = base_name[:-5]
+        prolog_path = os.path.join(temp_dir, base_name + '.p')
+
+        with open(prolog_path, 'w', encoding='utf-8') as out:
+            write_prolog(out, json_file.filename, entity_ids, relations, load_rule=False)
+
+        success, message = analyzer.initialize(prolog_path)
+        if not success:
+            return jsonify({'success': False, 'message': message}), 400
+
+        entities = analyzer.get_entities()
+        return jsonify({
+            'success': True,
+            'message': f'Parsed {len(entity_ids)} entities, {len(relations["contains"])} containment, '
+                       f'{len(relations["controls"])} control, {len(relations["connects"])} connection facts',
+            'entities': entities
+        }), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Parse error: {str(e)}'}), 500
 
 
 @app.route('/api/run-inference', methods=['POST'])

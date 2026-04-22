@@ -1,14 +1,15 @@
 let allFacts = [];
 let uploadBtn, useCase, uploadStatus, reloadBtn;
+let uploadMode = 'prolog'; // 'prolog' | 'json'
 
 function initializePage() {
     uploadBtn = document.getElementById('upload_btn');
     useCase = document.getElementById('use_case_file');
     uploadStatus = document.getElementById('upload_status');
     reloadBtn = document.getElementById('reload_btn');
-    
+
     if (!uploadBtn || !useCase) return;
-    
+
     attachEventListeners();
 }
 
@@ -16,6 +17,55 @@ function attachEventListeners() {
     if (useCase) useCase.addEventListener('change', handleFileInputChange);
     if (uploadBtn) uploadBtn.addEventListener('click', handleUploadClick);
     setupReloadButton();
+    setupModeToggle();
+}
+
+function setupModeToggle() {
+    const prologBtn = document.getElementById('mode_prolog_btn');
+    const jsonBtn = document.getElementById('mode_json_btn');
+    const prologGroup = document.getElementById('prolog_input_group');
+    const jsonGroup = document.getElementById('json_input_group');
+    const jsonFileInput = document.getElementById('json_file');
+
+    if (!prologBtn || !jsonBtn) return;
+
+    prologBtn.addEventListener('click', () => {
+        uploadMode = 'prolog';
+        prologBtn.style.background = 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)';
+        prologBtn.style.border = 'none';
+        jsonBtn.style.background = 'rgba(30,30,45,0.6)';
+        jsonBtn.style.border = '1px solid #4b5563';
+        prologGroup.style.display = '';
+        jsonGroup.style.display = 'none';
+    });
+
+    jsonBtn.addEventListener('click', () => {
+        uploadMode = 'json';
+        jsonBtn.style.background = 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)';
+        jsonBtn.style.border = 'none';
+        prologBtn.style.background = 'rgba(30,30,45,0.6)';
+        prologBtn.style.border = '1px solid #4b5563';
+        jsonGroup.style.display = '';
+        prologGroup.style.display = 'none';
+    });
+
+    if (jsonFileInput) {
+        jsonFileInput.addEventListener('change', (e) => {
+            const fileName = e.target.files[0]?.name;
+            const label = document.getElementById('json_file_label');
+            const nameEl = document.getElementById('json_file_name');
+            const placeholderEl = document.getElementById('json_file_placeholder');
+            if (fileName) {
+                if (label) label.classList.add('has-file');
+                if (nameEl) { nameEl.textContent = fileName; nameEl.style.display = 'block'; }
+                if (placeholderEl) placeholderEl.style.display = 'none';
+            } else {
+                if (label) label.classList.remove('has-file');
+                if (nameEl) nameEl.style.display = 'none';
+                if (placeholderEl) placeholderEl.style.display = 'block';
+            }
+        });
+    }
 }
 
 if (document.readyState === 'loading') {
@@ -86,6 +136,16 @@ function setupReloadButton() {
         if (useCaseName) useCaseName.style.display = 'none';
         const useCasePlaceholder = document.getElementById('use_case_placeholder');
         if (useCasePlaceholder) useCasePlaceholder.style.display = 'block';
+
+        const jsonInput = document.getElementById('json_file');
+        if (jsonInput) jsonInput.value = '';
+        const jsonLabel = document.getElementById('json_file_label');
+        if (jsonLabel) jsonLabel.classList.remove('has-file');
+        const jsonName = document.getElementById('json_file_name');
+        if (jsonName) jsonName.style.display = 'none';
+        const jsonPlaceholder = document.getElementById('json_file_placeholder');
+        if (jsonPlaceholder) jsonPlaceholder.style.display = 'block';
+
         if (uploadStatusEl) uploadStatusEl.innerHTML = '';
         
         document.getElementById('vuln_list').innerHTML = '';
@@ -196,6 +256,11 @@ async function visualizeFact(factRoot) {
 }
 
 async function handleUploadClick() {
+    if (uploadMode === 'json') {
+        await handleJsonUploadClick();
+        return;
+    }
+
     if (!useCase || !useCase.files[0]) {
         showStatus('upload_status', 'Please select use_case.p file', 'error');
         return;
@@ -203,7 +268,7 @@ async function handleUploadClick() {
 
     uploadBtn.disabled = true;
     showLoading('upload_status', 'Uploading files...');
-    
+
     _resetUI();
 
     const formData = new FormData();
@@ -256,6 +321,83 @@ async function handleUploadClick() {
                         document.getElementById('main_page').style.display = 'flex';
                     }, 500);
                     
+                    clearStatus('upload_status');
+                } else {
+                    showStatus('upload_status', `Facts error: ${factsData.message || 'Unknown error'}`, 'error');
+                }
+            } else {
+                showStatus('upload_status', `Inference error: ${inferenceResult.message}`, 'error');
+            }
+        } else {
+            showStatus('upload_status', `Error: ${result.message}`, 'error');
+        }
+    } catch (error) {
+        showStatus('upload_status', `Upload failed: ${error.message}`, 'error');
+    } finally {
+        uploadBtn.disabled = false;
+    }
+}
+
+async function handleJsonUploadClick() {
+    const jsonInput = document.getElementById('json_file');
+    if (!jsonInput || !jsonInput.files[0]) {
+        showStatus('upload_status', 'Please select a JSON file', 'error');
+        return;
+    }
+
+    uploadBtn.disabled = true;
+    showLoading('upload_status', 'Parsing JSON and generating Prolog facts...');
+
+    _resetUI();
+
+    const formData = new FormData();
+    formData.append('json_file', jsonInput.files[0]);
+
+    try {
+        const response = await fetch('/api/parse-json', {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showLoading('upload_status', `${result.message} — Running inference...`);
+            allFacts = result.entities || [];
+
+            const inferenceResponse = await fetch('/api/run-inference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ trace: false })
+            });
+
+            if (!inferenceResponse.ok) {
+                const errorData = await inferenceResponse.json();
+                showStatus('upload_status', `Inference failed: ${errorData.message || 'Unknown error'}`, 'error');
+                uploadBtn.disabled = false;
+                return;
+            }
+
+            const inferenceResult = await inferenceResponse.json();
+
+            if (inferenceResult.success) {
+                const factsResponse = await fetch('/api/facts-list');
+
+                if (!factsResponse.ok) {
+                    const errorData = await factsResponse.json();
+                    showStatus('upload_status', `Failed to fetch facts: ${errorData.message || 'Unknown error'}`, 'error');
+                    uploadBtn.disabled = false;
+                    return;
+                }
+
+                const factsData = await factsResponse.json();
+
+                if (factsData.success) {
+                    _populateFactLists(factsData);
+                    setTimeout(() => {
+                        document.getElementById('upload_page').style.display = 'none';
+                        document.getElementById('main_page').style.display = 'flex';
+                    }, 500);
                     clearStatus('upload_status');
                 } else {
                     showStatus('upload_status', `Facts error: ${factsData.message || 'Unknown error'}`, 'error');

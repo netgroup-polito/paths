@@ -1,5 +1,16 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% rule.p — Provenance-aware reasoning rules
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 :- dynamic derived_from/2.
 :- dynamic trace_enabled/0.
+
+% Enable tracing manually or from Python:
+% ?- assert(trace_enabled).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Helper predicates for tracing
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 trace_derivation(Subgoals, Head) :-
     call_all(Subgoals),
@@ -12,10 +23,16 @@ trace_derivation(Subgoals, Head) :-
 call_all([]).
 call_all([G|Gs]) :- call(G), call_all(Gs).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% COMPROMISE RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Basic compromission rule : assVul + not defended = canbeComp
 canbeComp(E,T) :-
     trace_derivation([assVul(E,T), not(defended(E,T))],
                      canbeComp(E,T)).
 
+% Compromission via containment
 canbeComp(E1,T) :-
     trace_derivation([(contain(E1,E2); isContained(E1,E2)),
                       assComp(E2,T),
@@ -23,6 +40,7 @@ canbeComp(E1,T) :-
                       not(defended(E1,T))],
                      canbeComp(E1,T)).
 
+% Compromission via connection
 canbeComp(E1,T) :-
     trace_derivation([connect(E3,E1,E2),
                       assComp(E2,T),
@@ -31,6 +49,7 @@ canbeComp(E1,T) :-
                       (assComp(E3,_); not(defended(E3,T)))],
                      canbeComp(E1,T)).
 
+% Compromission via control
 canbeComp(E1,T) :-
     trace_derivation([control(E1,E2),
                       assComp(E2,T),
@@ -38,29 +57,53 @@ canbeComp(E1,T) :-
                       not(defended(E1,T))],
                      canbeComp(E1,T)).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% MALFUNCTIONING RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Malfunctioning via compromission and cause
 canbeMalfun(E,M) :-
     trace_derivation([assComp(E,T), cause(T,M)],
                      canbeMalfun(E,M)).
 
+% Malfunctioning via dependency
 canbeMalfun(E1,M) :-
     trace_derivation([depend(E1,E2), assMalfun(E2,M)],
                      canbeMalfun(E1,M)).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% VULNERABILITY RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Basic vulnerability rule : exposed + exploitable = assVul
 canbeVul(E,T) :-
     trace_derivation([exposed(E,V), exploitable(V,T)],
                      canbeVul(E,T)).
 
+% Vulnerability via malfunctioning and induction
 canbeVul(E,T) :-
     trace_derivation([assMalfun(E,M), induce(M,V), exploitable(V,T)],
                      canbeVul(E,T)).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% DETECTION RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 canbeDet(E,T) :-
     trace_derivation([assComp(E,T), monitored(E,T)],
                      canbeDet(E,T)).
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% RESTORATION RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 canbeRest(E) :-
     trace_derivation([assDet(E,T), replicated(E)],
                      canbeRest(E)).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% FIXING RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 canbeFix(E) :-
     trace_derivation([assMalfun(E,M), checked(E)],
@@ -73,8 +116,5 @@ canbeFix(E) :-
 :- dynamic assVul/2, assComp/2, defended/2, assMalfun/2, assDet/2, assFix/2.
 :- dynamic contain/2, isContained/2, depend/2, defended/2, monitored/2,
            replicated/1, checked/1, connect/3, control/2, spread/3.
-:- dynamic digital_entity/1.
-:- dynamic exposed/2, exploitable/2, cause/2, induce/2.
-:- dynamic vulnerability/1, threat/1, misbehavior/1.
 
 
