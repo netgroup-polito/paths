@@ -66,6 +66,11 @@ function setupModeToggle() {
             }
         });
     }
+
+    const kafkaBtn = document.getElementById('kafka_btn');
+    if (kafkaBtn) {
+        kafkaBtn.addEventListener('click', handleKafkaFetch);
+    }
 }
 
 if (document.readyState === 'loading') {
@@ -335,6 +340,66 @@ async function handleUploadClick() {
         showStatus('upload_status', `Upload failed: ${error.message}`, 'error');
     } finally {
         uploadBtn.disabled = false;
+    }
+}
+
+async function handleKafkaFetch() {
+    uploadBtn.disabled = true;
+    const kafkaBtn = document.getElementById('kafka_btn');
+    if (kafkaBtn) kafkaBtn.disabled = true;
+
+    showLoading('upload_status', 'Connecting to Kafka and fetching latest SCG…');
+    _resetUI();
+
+    try {
+        const response = await fetch('/api/fetch-kafka', { method: 'POST' });
+        const result = await response.json();
+
+        if (!result.success) {
+            showStatus('upload_status', `Error: ${result.message}`, 'error');
+            return;
+        }
+
+        showLoading('upload_status', `${result.message} — Running inference…`);
+        allFacts = result.entities || [];
+
+        const inferenceResponse = await fetch('/api/run-inference', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trace: false })
+        });
+
+        if (!inferenceResponse.ok) {
+            const errorData = await inferenceResponse.json();
+            showStatus('upload_status', `Inference failed: ${errorData.message || 'Unknown error'}`, 'error');
+            return;
+        }
+
+        const inferenceResult = await inferenceResponse.json();
+
+        if (!inferenceResult.success) {
+            showStatus('upload_status', `Inference error: ${inferenceResult.message}`, 'error');
+            return;
+        }
+
+        const factsResponse = await fetch('/api/facts-list');
+        const factsData = await factsResponse.json();
+
+        if (factsData.success) {
+            _populateFactLists(factsData);
+            setTimeout(() => {
+                document.getElementById('upload_page').style.display = 'none';
+                document.getElementById('main_page').style.display = 'flex';
+            }, 500);
+            clearStatus('upload_status');
+        } else {
+            showStatus('upload_status', `Facts error: ${factsData.message || 'Unknown error'}`, 'error');
+        }
+    } catch (error) {
+        showStatus('upload_status', `Kafka fetch failed: ${error.message}`, 'error');
+    } finally {
+        uploadBtn.disabled = false;
+        if (kafkaBtn) kafkaBtn.disabled = false;
     }
 }
 

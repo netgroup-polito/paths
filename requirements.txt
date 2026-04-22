@@ -4,4 +4,6 @@ pyswip==0.3.3
 networkx==3.1
 matplotlib==3.7.2
 numpy==1.26.0
+kafka-python==2.0.2
+jsonschema==4.23.0
 #pygraphviz==1.10

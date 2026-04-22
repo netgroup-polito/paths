@@ -11,6 +11,9 @@ import atexit
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'parser'))
 from parser import build_name_registry, collect_entities, process_links, write_prolog
 
+from kafka import KafkaConsumer, TopicPartition
+import jsonschema
+
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -402,6 +405,136 @@ def upload_files():
     
     except Exception as e:
         return jsonify({'success': False, 'message': f"Upload error: {str(e)}"}), 500
+
+
+KAFKA_BROKERS = [
+    'kafka-broker-0.intra.miranda.onesource.pt:9093',
+    'kafka-broker-1.intra.miranda.onesource.pt:9093',
+    'kafka-broker-2.intra.miranda.onesource.pt:9093',
+]
+KAFKA_TOPIC = 'ctxd'
+KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'static', 'ctxd-v2.0.json')
+KAFKA_LOOKBACK = 200  # max messages to scan backwards per partition
+
+with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:
+    _CTXD_SCHEMA = json.load(_f)
+
+
+def _matches_ctxd_schema(raw_bytes):
+    """Return parsed dict if *raw_bytes* is valid JSON conforming to the ctxd schema, else None."""
+    try:
+        data = json.loads(raw_bytes)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    try:
+        jsonschema.validate(instance=data, schema=_CTXD_SCHEMA)
+        return data
+    except jsonschema.ValidationError:
+        return None
+
+
+def _fetch_latest_kafka_message(brokers, topic, timeout_ms=15000):
+    """
+    Return the parsed JSON of the most recent message on *topic* that
+    validates against the ctxd-v2.0 schema, scanning up to KAFKA_LOOKBACK
+    messages backwards from the end of each partition.
+    """
+    consumer = KafkaConsumer(
+        bootstrap_servers=brokers,
+        security_protocol='SSL',
+        ssl_check_hostname=False,
+        ssl_cafile=None,
+        consumer_timeout_ms=timeout_ms,
+        auto_offset_reset='earliest',
+        enable_auto_commit=False,
+    )
+    try:
+        partition_ids = consumer.partitions_for_topic(topic)
+        if not partition_ids:
+            raise RuntimeError(f"Topic '{topic}' not found or has no partitions")
+
+        tps = [TopicPartition(topic, p) for p in partition_ids]
+        consumer.assign(tps)
+        consumer.seek_to_end(*tps)
+
+        # For each partition build a window [max(0, end-LOOKBACK), end)
+        windows = {}
+        for tp in tps:
+            end = consumer.position(tp)
+            if end > 0:
+                consumer.seek(tp, max(0, end - KAFKA_LOOKBACK))
+                windows[tp.partition] = end
+            # partitions with end==0 have no messages; skip them
+
+        if not windows:
+            raise RuntimeError(f"Topic '{topic}' exists but contains no messages")
+
+        # Collect all messages in the windows, newest-first per partition
+        bucket: dict[int, list] = {p: [] for p in windows}
+        for msg in consumer:
+            if msg.partition in windows and msg.offset < windows[msg.partition]:
+                bucket[msg.partition].append(msg)
+
+        # Flatten and sort descending by offset so we validate newest first
+        candidates = sorted(
+            [m for msgs in bucket.values() for m in msgs],
+            key=lambda m: m.offset,
+            reverse=True,
+        )
+
+        for msg in candidates:
+            data = _matches_ctxd_schema(msg.value)
+            if data is not None:
+                return data
+
+        raise RuntimeError(
+            f"No ctxd-v2.0-conforming message found in the last {KAFKA_LOOKBACK} "
+            f"messages of topic '{topic}'"
+        )
+    finally:
+        consumer.close()
+
+
+@app.route('/api/fetch-kafka', methods=['POST', 'OPTIONS'])
+def fetch_kafka():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        data = _fetch_latest_kafka_message(KAFKA_BROKERS, KAFKA_TOPIC)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Kafka error: {str(e)}'}), 502
+
+    try:
+        services = data.get('services', [])
+        links = data.get('links', [])
+
+        registry = build_name_registry(services, links)
+        entity_ids, _ = collect_entities(services, registry)
+        relations = process_links(links, registry)
+
+        temp_dir = app.config['TEMP_UPLOAD_DIR']
+        prolog_path = os.path.join(temp_dir, 'kafka_ctxd.p')
+
+        with open(prolog_path, 'w', encoding='utf-8') as out:
+            write_prolog(out, f'kafka://{KAFKA_TOPIC}', entity_ids, relations, load_rule=False)
+
+        success, message = analyzer.initialize(prolog_path)
+        if not success:
+            return jsonify({'success': False, 'message': message}), 400
+
+        entities = analyzer.get_entities()
+        return jsonify({
+            'success': True,
+            'message': f'Fetched from Kafka — {len(entity_ids)} entities, '
+                       f'{len(relations["contains"])} containment, '
+                       f'{len(relations["controls"])} control, '
+                       f'{len(relations["connects"])} connection facts',
+            'entities': entities
+        }), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Parse error: {str(e)}'}), 500
 
 
 @app.route('/api/parse-json', methods=['POST', 'OPTIONS'])
