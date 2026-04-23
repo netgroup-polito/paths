@@ -185,9 +185,9 @@ def fill_prolog_file(input_path: str, output_path: str) -> None:
 
 
 def main() -> None:
-    here = os.path.dirname(os.path.abspath(__file__))
-    input_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "generated.p")
-    output_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "filled.p")
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    input_path  = sys.argv[1] if len(sys.argv) > 1 else os.path.join(repo, "data", "generated.p")
+    output_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(repo, "data", "generated.p")
 
     if not os.path.exists(input_path):
         print(f"Error: input file not found: {input_path}", file=sys.stderr)

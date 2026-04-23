@@ -30,7 +30,7 @@ from pyswip import Prolog
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024
 app.config['STATIC_RULES_FILE'] = os.path.join(
-    os.path.dirname(__file__), 'static', 'prolog_files', 'rule.p'
+    os.path.dirname(__file__), 'prolog', 'rule.p'
 )
 app.config['TEMP_UPLOAD_DIR'] = tempfile.mkdtemp(prefix='prolog_analyzer_')
 
@@ -414,7 +414,7 @@ KAFKA_BROKERS = [
     'kafka-broker-2.intra.miranda.onesource.pt:9093',
 ]
 KAFKA_TOPIC = 'ctxd'
-KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'static', 'ctxd-v2.0.json')
+KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'schemas', 'ctxd-v2.0.json')
 KAFKA_LOOKBACK = 200  # max messages to scan backwards per partition
 
 with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:

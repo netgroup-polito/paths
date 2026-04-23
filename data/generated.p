@@ -1,4 +1,4 @@
-% Auto-generated from output_threat_correlator.json on 2026-04-23 17:06:01
+% Auto-generated from data/output_threat_correlator.json on 2026-04-23 17:16:18
 % DO NOT EDIT — regenerate with parser.py
 
 :- ['rule.p'].
@@ -1582,7 +1582,7 @@ exposed("upf_app","CVE-2026-3026").
 
 
 % ════════════════════════════════════════════════════════════
-% 5G attack-scenario knowledge base — filler.py  2026-04-23 17:06:01
+% 5G attack-scenario knowledge base — filler.py  2026-04-23 17:16:18
 %
 %  Chain 1  Subscriber Harvest → Session Wiretap
 %  Chain 2  Cascading Core Collapse (UPF → SMF → UDR)

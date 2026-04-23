@@ -24,28 +24,41 @@ When using the provided GUI, the graphs are visually rendered with Cytoscape.
 
 ```
 .
-├── app.py                 # Flask backend with Prolog engine
-├── requirements.txt       # Python dependencies
-├── Dockerfile            # Docker container definition
-├── docker-compose.yml    # Docker Compose orchestration
-├── setup.sh             # Setup verification script
-├── start.sh             # Application startup script
+├── app.py                          # Flask backend with Prolog engine
+├── requirements.txt                # Python dependencies
+├── Dockerfile                      # Docker container definition
+├── docker-compose.yml              # Docker Compose orchestration
+├── setup.sh                        # Setup verification script
+├── start.sh                        # Application startup script
+├── parser/
+│   ├── parser.py                   # ctxd-v2.0 JSON → Prolog converter
+│   └── filler.py                   # 5G attack-scenario knowledge base appender
+├── prolog/
+│   ├── rule.p                      # Formal derivation rules
+│   └── examples/                   # Sample Knowledge Base files
+├── data/
+│   ├── schemas/
+│   │   └── ctxd-v2.0.json          # ctxd-v2.0 JSON schema
+│   ├── samples/                    # Example JSON inputs
+│   ├── output_threat_correlator.json
+│   └── generated.p                 # Parser + filler output
 ├── static/
-│   ├── script.js        # Frontend interaction logic
-│   ├── style.css        # Styling
-│   └── prolog_files/    # Prolog derivation rules and example of KB
+│   ├── script.js                   # Frontend interaction logic
+│   └── style.css                   # Styling
 └── templates/
-    └── index.html       # Web interface
+    └── index.html                  # Web interface
 ```
 
 ## API Endpoints
 
-- `POST /api/upload` - Upload Knowledge Base file
-- `POST /api/run-inference` - Execute inference engine
-- `GET /api/facts-list` - Retrieve all derived facts
-- `POST /api/search` - Retrieve derived facts matching the pattern
-- `POST /api/expand-graph` - Visualize forest of paths matching the pattern
-- `POST /api/visualize-root` - Visualize specific fact path
+- `POST /api/upload` - Upload a Prolog Knowledge Base file (.p)
+- `POST /api/parse-json` - Upload a ctxd-v2.0 JSON file, parse it into a KB, and load it
+- `POST /api/fetch-kafka` - Fetch the latest ctxd-v2.0-conforming message from Kafka and load it
+- `POST /api/run-inference` - Execute the inference engine on the loaded KB
+- `GET  /api/facts-list` - Retrieve all derived facts
+- `POST /api/search` - Retrieve derived facts matching a pattern
+- `POST /api/expand-graph` - Visualize the forest of derivation paths matching a pattern
+- `POST /api/visualize-root` - Visualize the derivation path for a specific fact
 
 ## Usage 
 ### Option 1: Docker 
