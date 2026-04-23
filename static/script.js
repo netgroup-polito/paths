@@ -1,6 +1,6 @@
 let allFacts = [];
 let uploadBtn, useCase, uploadStatus, reloadBtn;
-let uploadMode = 'prolog'; // 'prolog' | 'json'
+let uploadMode = 'prolog';
 
 function initializePage() {
     uploadBtn = document.getElementById('upload_btn');

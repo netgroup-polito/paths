@@ -1,22 +1,4 @@
 #!/usr/bin/env python3
-"""
-parser.py — ctxd-v2.0 JSON → Miranda Prolog .p file
-
-Reads a JSON file conforming to the ctxd-v2.0 schema and produces a Prolog
-fact file compatible with rule.p (Miranda project).
-
-Usage:
-    python3 parser.py <input.json> [-o output.p] [--no-load-rule] [--audit]
-
-Link-type → Prolog mapping:
-    containing / hosting  → contain/2  (isContained mirrors commented out)
-    controlling           → control/2
-    packet_flow           → connect/3  (forwarder node as Via; all pairs of
-                            endpoints sharing the same forwarder are linked)
-    api                   → connect/3  (Via = "api", bidirectional)
-    protecting            → commented-out defended/2  (threat unknown)
-"""
-
 import json
 import sys
 import argparse
@@ -24,12 +6,7 @@ from datetime import datetime
 from itertools import combinations
 
 
-# ---------------------------------------------------------------------------
-# Name / ID helpers
-# ---------------------------------------------------------------------------
-
 def extract_name(name_obj: dict) -> str:
-    """Return the string value from a polymorphic name object."""
     if not name_obj or not isinstance(name_obj, dict):
         return ""
     for key in ("local", "hostname", "uri", "uuid"):
@@ -39,17 +16,8 @@ def extract_name(name_obj: dict) -> str:
 
 
 def get_entity_id(sid: dict) -> str:
-    """
-    Derive a human-readable, unique-ish entity identifier from a sid dict.
-
-    Strategy (in priority order):
-        name_type_subtype  when both type and subtype are present
-        name_type          when only type is present
-        name_subtype       when only subtype is present
-        namespace_name     when namespace is present and differs from name
-        domain_name        when domain is present and differs from name
-        name               as final fallback
-    Returns empty string if name is absent.
+    """Derive a human-readable entity id from a sid dict.
+    Priority: name_type_subtype > name_type > name_subtype > namespace_name > domain_name > name
     """
     if not sid or not isinstance(sid, dict):
         return ""
@@ -76,7 +44,6 @@ def get_entity_id(sid: dict) -> str:
 
 
 def sid_key(sid: dict) -> tuple:
-    """Hashable deduplication key for a sid."""
     if not sid:
         return ()
     return (
@@ -89,19 +56,12 @@ def sid_key(sid: dict) -> tuple:
 
 
 def pl(s: str) -> str:
-    """Wrap a string as a Prolog double-quoted atom, escaping special chars."""
     escaped = s.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 
 def build_name_registry(services: list, links: list) -> dict:
-    """
-    Pre-compute entity ids for all sids, adding domain disambiguation only
-    when two distinct sids would otherwise produce the same base name.
-
-    Returns: dict mapping sid_key tuple → entity_id string.
-    """
-    # Collect every unique sid from services, subservices, and links.
+    """Pre-compute entity ids, adding domain disambiguation only for colliding base names."""
     all_sids: dict[tuple, dict] = {}
     for item in services:
         svc = item.get("service", {})
@@ -118,7 +78,6 @@ def build_name_registry(services: list, links: list) -> dict:
                 if k not in all_sids:
                     all_sids[k] = s
 
-    # First pass: compute base names and find collisions.
     base_to_keys: dict[str, list] = {}
     for k, s in all_sids.items():
         base = get_entity_id(s)
@@ -126,7 +85,6 @@ def build_name_registry(services: list, links: list) -> dict:
             base_to_keys.setdefault(base, []).append(k)
     colliding: set[str] = {b for b, keys in base_to_keys.items() if len(keys) > 1}
 
-    # Second pass: build final registry; add domain only for colliding names.
     registry: dict[tuple, str] = {}
     for k, s in all_sids.items():
         base = get_entity_id(s)
@@ -136,7 +94,6 @@ def build_name_registry(services: list, links: list) -> dict:
         if base not in colliding:
             registry[k] = base
             continue
-        # Disambiguate using domain.
         name = s.get("name", "")
         domain_val = s.get("domain", "")
         type_val = s.get("type", "")
@@ -152,21 +109,11 @@ def build_name_registry(services: list, links: list) -> dict:
         if domain_val and domain_val != name:
             registry[k] = f"{name}_{domain_val}_{type_suffix}" if type_suffix else f"{domain_val}_{name}"
         else:
-            registry[k] = base  # no domain available; keep base name
+            registry[k] = base
     return registry
 
 
-# ---------------------------------------------------------------------------
-# Service collection
-# ---------------------------------------------------------------------------
-
 def collect_entities(services: list, registry: dict = None) -> tuple[list[str], list[dict]]:
-    """
-    Return a tuple of:
-        entity_ids : sorted, deduplicated list of entity-id strings
-        dropped    : list of dicts for services/subservices whose sid
-                     was present but produced an empty entity id
-    """
     seen_keys: set[tuple] = set()
     entity_ids: list[str] = []
     dropped: list[dict] = []
@@ -187,7 +134,6 @@ def collect_entities(services: list, registry: dict = None) -> tuple[list[str], 
         else:
             dropped.append({"kind": "service", "sid": sid, "reason": "empty entity id"})
 
-        # Also register subservices as entities
         for sub in svc.get("subservices", []):
             sub_key = sid_key(sub)
             if sub_key in seen_keys:
@@ -202,28 +148,14 @@ def collect_entities(services: list, registry: dict = None) -> tuple[list[str], 
     return sorted(set(entity_ids)), dropped
 
 
-# ---------------------------------------------------------------------------
-# Link processing
-# ---------------------------------------------------------------------------
-
 def process_links(links: list, registry: dict = None) -> dict:
-    """
-    Parse all links and return a dict with collected Prolog relation sets:
-        contains    : set of (container, guest) tuples
-        controls    : set of (controller, controlled) tuples
-        connects    : set of (via, e1, e2) tuples
-        defends     : set of entity strings whose defender is known
-        unmatched   : list of peer-pair dicts that produced no Prolog fact
-        skipped     : list of peer-pair dicts skipped due to missing entity id
-    """
+    """Parse all links and return sets of Prolog relations: contains, controls, connects, defends, unmatched, skipped."""
     contains: set[tuple] = set()
     controls: set[tuple] = set()
     connects: set[tuple] = set()
     defends: set[str] = set()
     unmatched: list[dict] = []
     skipped: list[dict] = []
-
-    # For packet_flow aggregation: forwarder_id → set of endpoint_ids
     fwd_endpoints: dict[str, set] = {}
 
     for item in links:
@@ -254,11 +186,7 @@ def process_links(links: list, registry: dict = None) -> dict:
 
             pair_matched = False
 
-            # ----------------------------------------------------------------
             if link_type in ("containing", "hosting"):
-                # Observed role combos (from schema + full-testbed.json):
-                #   hosting:   guest ↔ host      (both directions)
-                #   containing: guest + contained (subject=guest, peer=enclosing scope)
                 if role == "guest" and peer_role == "host":
                     contains.add((peer_id, subject_id))
                     pair_matched = True
@@ -266,11 +194,9 @@ def process_links(links: list, registry: dict = None) -> dict:
                     contains.add((subject_id, peer_id))
                     pair_matched = True
                 elif role == "guest" and peer_role == "contained":
-                    # peer is the enclosing pod/namespace; subject is the inner entity.
                     contains.add((subject_id, peer_id))
                     pair_matched = True
 
-            # ----------------------------------------------------------------
             elif link_type == "controlling":
                 if role == "controlled" and peer_role == "control":
                     controls.add((peer_id, subject_id))
@@ -279,23 +205,18 @@ def process_links(links: list, registry: dict = None) -> dict:
                     controls.add((subject_id, peer_id))
                     pair_matched = True
 
-            # ----------------------------------------------------------------
             elif link_type == "packet_flow":
-                # Accumulate endpoint→forwarder relationships.
-                # endpoint ↔ forwarding: the forwarder is the Via node.
                 if role == "endpoint" and peer_role == "forwarding":
                     fwd_endpoints.setdefault(peer_id, set()).add(subject_id)
                     pair_matched = True
                 elif role == "forwarding" and peer_role == "endpoint":
                     fwd_endpoints.setdefault(subject_id, set()).add(peer_id)
                     pair_matched = True
-                # forwarding ↔ forwarding: direct connection between forwarders
                 elif role == "forwarding" and peer_role == "forwarding":
                     connects.add(("packet_flow", subject_id, peer_id))
                     connects.add(("packet_flow", peer_id, subject_id))
                     pair_matched = True
 
-            # ----------------------------------------------------------------
             elif link_type == "api":
                 if role == "client" and peer_role == "server":
                     connects.add(("api", subject_id, peer_id))
@@ -306,10 +227,7 @@ def process_links(links: list, registry: dict = None) -> dict:
                     connects.add(("api", subject_id, peer_id))
                     pair_matched = True
 
-            # ----------------------------------------------------------------
             elif link_type == "protecting":
-                # We know the protected entity but not the specific threat.
-                # Emit a comment placeholder.
                 if role == "protected":
                     defends.add(subject_id)
                     pair_matched = True
@@ -326,9 +244,6 @@ def process_links(links: list, registry: dict = None) -> dict:
                     "peer_role": peer_role,
                 })
 
-    # Expand packet_flow forwarder groups into connect/3 facts.
-    # connect(Via, E1, E2) — Via is the channel between E1 and E2.
-    # Full pairwise: every endpoint pair is linked via the forwarder node.
     for fwd, endpoints in fwd_endpoints.items():
         ep_list = sorted(endpoints)
         for ep_a, ep_b in combinations(ep_list, 2):
@@ -345,9 +260,24 @@ def process_links(links: list, registry: dict = None) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Output generation
-# ---------------------------------------------------------------------------
+def collect_vulnerabilities(service_vulns: list, registry: dict = None) -> tuple[list, list]:
+    vulns: set[str] = set()
+    exposed: set[tuple] = set()
+
+    for entry in service_vulns:
+        sid = entry.get("service_sid", {})
+        k = sid_key(sid)
+        entity_id = registry[k] if registry and k in registry else get_entity_id(sid)
+        if not entity_id:
+            continue
+        for vuln in entry.get("vulnerabilities", []):
+            cve_id = vuln.get("cve_id", "").strip()
+            if cve_id:
+                vulns.add(cve_id)
+                exposed.add((entity_id, cve_id))
+
+    return sorted(vulns), sorted(exposed)
+
 
 def write_prolog(
     out,
@@ -355,6 +285,8 @@ def write_prolog(
     entity_ids: list[str],
     relations: dict,
     load_rule: bool,
+    vulnerabilities: list = None,
+    exposed_pairs: list = None,
 ) -> None:
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     out.write(f"% Auto-generated from {input_path} on {stamp}\n")
@@ -363,86 +295,58 @@ def write_prolog(
     if load_rule:
         out.write(":- ['rule.p'].\n\n")
 
-    # ENTITIES ---------------------------------------------------------------
     out.write("%%%%%% ENTITIES\n\n")
     for eid in entity_ids:
         out.write(f"digital_entity({pl(eid)}).\n")
 
-    # RELATIONS --------------------------------------------------------------
     out.write("\n%%%%% RELATIONS\n")
 
-    # Containment
     contains = sorted(relations["contains"])
     if contains:
         out.write("\n% --- Containment ---\n")
         for container, guest in contains:
             out.write(f"contain({pl(container)},{pl(guest)}).\n")
-        # isContained mirrors are commented out; uncomment to enable them.
-        # out.write("\n% --- IsContained (mirrors) ---\n")
-        # for container, guest in contains:
-        #     out.write(f"isContained({pl(guest)},{pl(container)}).\n")
 
-    # Controls
     controls = sorted(relations["controls"])
     if controls:
         out.write("\n% --- Controls ---\n")
         for controller, controlled in controls:
             out.write(f"control({pl(controller)},{pl(controlled)}).\n")
 
-    # Connections
     connects = sorted(relations["connects"])
     if connects:
         out.write("\n% --- Connections ---\n")
         for via, e1, e2 in connects:
             out.write(f"connect({pl(via)},{pl(e1)},{pl(e2)}).\n")
 
-"""     # Defenses (partial — threat type must be filled manually)
-    defends = sorted(relations["defends"])
-    if defends:
-        out.write("\n% --- Defenses (protecting links found; fill in threat manually) ---\n")
-        for entity in defends:
-            out.write(f"% defended({pl(entity)},<threat>).\n") """
+    if vulnerabilities:
+        out.write("\n% --- Vulnerabilities ---\n")
+        for cve in vulnerabilities:
+            out.write(f"vulnerability({pl(cve)}).\n")
 
+    if exposed_pairs:
+        out.write("\n% --- Exposed ---\n")
+        for entity, cve in exposed_pairs:
+            out.write(f"exposed({pl(entity)},{pl(cve)}).\n")
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 def parse_args():
     p = argparse.ArgumentParser(
         description="Convert a ctxd-v2.0 JSON file to a Miranda Prolog .p file."
     )
     p.add_argument("input", help="Input JSON file (ctxd-v2.0 format)")
-    p.add_argument(
-        "-o", "--output",
-        help="Output .p file (default: same name as input with .p extension)",
-    )
-    p.add_argument(
-        "--no-load-rule",
-        action="store_true",
-        help="Do not prepend :- ['rule.p']. directive",
-    )
-    p.add_argument(
-        "--audit",
-        action="store_true",
-        help=(
-            "After parsing, print a coverage report showing how many peer pairs "
-            "were matched per link type and list any pairs that produced no fact."
-        ),
-    )
+    p.add_argument("-o", "--output", help="Output .p file (default: input with .p extension)")
+    p.add_argument("--no-load-rule", action="store_true", help="Do not prepend :- ['rule.p'].")
+    p.add_argument("--audit", action="store_true", help="Print a coverage report after parsing.")
     return p.parse_args()
 
 
 def _print_audit(links: list, relations: dict, dropped: list, services: list = None) -> None:
-    """Print a coverage report for --audit mode."""
     from collections import Counter
 
     unmatched = relations["unmatched"]
     skipped = relations["skipped"]
 
-    # Count matched pairs per link_type by reconstructing totals from the JSON.
-    # A pair is "seen" if subject_id and peer_id are both non-empty; among those,
-    # unmatched ones are in relations["unmatched"].
     total_pairs = 0
     seen_by_type: Counter = Counter()
     for item in links:
@@ -458,8 +362,7 @@ def _print_audit(links: list, relations: dict, dropped: list, services: list = N
                 total_pairs += 1
 
     unmatched_by_type: Counter = Counter(e["link_type"] for e in unmatched)
-    matched_by_type = {lt: seen_by_type[lt] - unmatched_by_type[lt]
-                       for lt in seen_by_type}
+    matched_by_type = {lt: seen_by_type[lt] - unmatched_by_type[lt] for lt in seen_by_type}
 
     print("\n--- AUDIT REPORT ---")
     print(f"Total peer pairs with valid ids : {total_pairs}")
@@ -477,7 +380,6 @@ def _print_audit(links: list, relations: dict, dropped: list, services: list = N
 
     if unmatched:
         print(f"UNMATCHED pairs ({len(unmatched)}) — no Prolog fact generated:")
-        # Group by (link_type, role, peer_role) to avoid flooding the output
         combo: Counter = Counter(
             (e["link_type"], e["role"], e["peer_role"]) for e in unmatched
         )
@@ -493,7 +395,7 @@ def _print_audit(links: list, relations: dict, dropped: list, services: list = N
                       f"  ↔  {e['peer']!r} [{e['peer_role']}]")
                 shown[key] += 1
     else:
-        print("All peer pairs with valid ids were matched. No gaps found.")
+        print("All peer pairs with valid ids were matched.")
 
     if skipped:
         print(f"\nSKIPPED pairs ({len(skipped)}) — empty entity id (sample up to 10):")
@@ -501,12 +403,8 @@ def _print_audit(links: list, relations: dict, dropped: list, services: list = N
             print(f"  {e['link_type']}  {e['subject']!r} [{e['role']}]"
                   f"  ↔  {e['peer']!r} [{e['peer_role']}]")
 
-    # Entity coverage
     print()
     if dropped:
-        # Count total occurrences of each dropped sid key across all services
-        # (dedup in collect_entities means we only record it once, but it may
-        # appear in multiple service entries with the same sid key).
         raw_counts: Counter = Counter()
         if services:
             for item in services:
@@ -531,7 +429,6 @@ def _print_audit(links: list, relations: dict, dropped: list, services: list = N
 def main():
     args = parse_args()
 
-    # Determine output path
     if args.output:
         output_path = args.output
     else:
@@ -540,7 +437,6 @@ def main():
             base = base[:-5]
         output_path = base + ".p"
 
-    # Load JSON
     try:
         with open(args.input, encoding="utf-8") as f:
             data = json.load(f)
@@ -553,19 +449,23 @@ def main():
 
     services = data.get("services", [])
     links = data.get("links", [])
+    service_vulns = data.get("service_vulnerabilities", [])
 
-    print(f"Loaded {len(services)} service entries, {len(links)} link entries.")
+    print(f"Loaded {len(services)} service entries, {len(links)} link entries, "
+          f"{len(service_vulns)} vulnerability entries.")
 
     registry = build_name_registry(services, links)
     entity_ids, dropped = collect_entities(services, registry)
     relations = process_links(links, registry)
+    vulnerabilities, exposed_pairs = collect_vulnerabilities(service_vulns, registry)
 
     print(
         f"Unique entities: {len(entity_ids)} | "
         f"contain: {len(relations['contains'])} | "
         f"control: {len(relations['controls'])} | "
         f"connect: {len(relations['connects'])} | "
-        f"defend stubs: {len(relations['defends'])}"
+        f"vulnerabilities: {len(vulnerabilities)} | "
+        f"exposed pairs: {len(exposed_pairs)}"
     )
 
     if args.audit:
@@ -578,6 +478,8 @@ def main():
             entity_ids,
             relations,
             load_rule=not args.no_load_rule,
+            vulnerabilities=vulnerabilities,
+            exposed_pairs=exposed_pairs,
         )
 
     print(f"Written: {output_path}")

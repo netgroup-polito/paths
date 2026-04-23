@@ -66,10 +66,6 @@ canbeFix(E) :-
     trace_derivation([assMalfun(E,M), checked(E)],
                      canbeFix(E)).
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% DYNAMIC DECLARATIONS
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 :- dynamic assVul/2, assComp/2, defended/2, assMalfun/2, assDet/2, assFix/2.
 :- dynamic contain/2, isContained/2, depend/2, defended/2, monitored/2,
            replicated/1, checked/1, connect/3, control/2, spread/3.

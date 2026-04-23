@@ -9,7 +9,8 @@ import shutil
 import atexit
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'parser'))
-from parser import build_name_registry, collect_entities, process_links, write_prolog
+from parser import build_name_registry, collect_entities, process_links, write_prolog, collect_vulnerabilities
+from filler import fill_prolog_file
 
 from kafka import KafkaConsumer, TopicPartition
 import jsonschema
@@ -421,7 +422,6 @@ with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:
 
 
 def _matches_ctxd_schema(raw_bytes):
-    """Return parsed dict if *raw_bytes* is valid JSON conforming to the ctxd schema, else None."""
     try:
         data = json.loads(raw_bytes)
     except (json.JSONDecodeError, ValueError):
@@ -434,11 +434,6 @@ def _matches_ctxd_schema(raw_bytes):
 
 
 def _fetch_latest_kafka_message(brokers, topic, timeout_ms=15000):
-    """
-    Return the parsed JSON of the most recent message on *topic* that
-    validates against the ctxd-v2.0 schema, scanning up to KAFKA_LOOKBACK
-    messages backwards from the end of each partition.
-    """
     consumer = KafkaConsumer(
         bootstrap_servers=brokers,
         security_protocol='SSL',
@@ -457,25 +452,21 @@ def _fetch_latest_kafka_message(brokers, topic, timeout_ms=15000):
         consumer.assign(tps)
         consumer.seek_to_end(*tps)
 
-        # For each partition build a window [max(0, end-LOOKBACK), end)
         windows = {}
         for tp in tps:
             end = consumer.position(tp)
             if end > 0:
                 consumer.seek(tp, max(0, end - KAFKA_LOOKBACK))
                 windows[tp.partition] = end
-            # partitions with end==0 have no messages; skip them
 
         if not windows:
             raise RuntimeError(f"Topic '{topic}' exists but contains no messages")
 
-        # Collect all messages in the windows, newest-first per partition
         bucket: dict[int, list] = {p: [] for p in windows}
         for msg in consumer:
             if msg.partition in windows and msg.offset < windows[msg.partition]:
                 bucket[msg.partition].append(msg)
 
-        # Flatten and sort descending by offset so we validate newest first
         candidates = sorted(
             [m for msgs in bucket.values() for m in msgs],
             key=lambda m: m.offset,
@@ -508,16 +499,22 @@ def fetch_kafka():
     try:
         services = data.get('services', [])
         links = data.get('links', [])
+        service_vulns = data.get('service_vulnerabilities', [])
 
         registry = build_name_registry(services, links)
         entity_ids, _ = collect_entities(services, registry)
         relations = process_links(links, registry)
+        vulnerabilities, exposed_pairs = collect_vulnerabilities(service_vulns, registry)
 
         temp_dir = app.config['TEMP_UPLOAD_DIR']
         prolog_path = os.path.join(temp_dir, 'kafka_ctxd.p')
 
         with open(prolog_path, 'w', encoding='utf-8') as out:
-            write_prolog(out, f'kafka://{KAFKA_TOPIC}', entity_ids, relations, load_rule=False)
+            write_prolog(out, f'kafka://{KAFKA_TOPIC}', entity_ids, relations,
+                         load_rule=False, vulnerabilities=vulnerabilities,
+                         exposed_pairs=exposed_pairs)
+
+        fill_prolog_file(prolog_path, prolog_path)
 
         success, message = analyzer.initialize(prolog_path)
         if not success:
@@ -529,7 +526,8 @@ def fetch_kafka():
             'message': f'Fetched from Kafka — {len(entity_ids)} entities, '
                        f'{len(relations["contains"])} containment, '
                        f'{len(relations["controls"])} control, '
-                       f'{len(relations["connects"])} connection facts',
+                       f'{len(relations["connects"])} connection, '
+                       f'{len(exposed_pairs)} exposed facts',
             'entities': entities
         }), 200
 
@@ -559,10 +557,12 @@ def parse_json():
     try:
         services = data.get('services', [])
         links = data.get('links', [])
+        service_vulns = data.get('service_vulnerabilities', [])
 
         registry = build_name_registry(services, links)
         entity_ids, _ = collect_entities(services, registry)
         relations = process_links(links, registry)
+        vulnerabilities, exposed_pairs = collect_vulnerabilities(service_vulns, registry)
 
         temp_dir = app.config['TEMP_UPLOAD_DIR']
         base_name = secure_filename(json_file.filename or 'parsed')
@@ -571,7 +571,11 @@ def parse_json():
         prolog_path = os.path.join(temp_dir, base_name + '.p')
 
         with open(prolog_path, 'w', encoding='utf-8') as out:
-            write_prolog(out, json_file.filename, entity_ids, relations, load_rule=False)
+            write_prolog(out, json_file.filename, entity_ids, relations,
+                         load_rule=False, vulnerabilities=vulnerabilities,
+                         exposed_pairs=exposed_pairs)
+
+        fill_prolog_file(prolog_path, prolog_path)
 
         success, message = analyzer.initialize(prolog_path)
         if not success:
@@ -581,7 +585,8 @@ def parse_json():
         return jsonify({
             'success': True,
             'message': f'Parsed {len(entity_ids)} entities, {len(relations["contains"])} containment, '
-                       f'{len(relations["controls"])} control, {len(relations["connects"])} connection facts',
+                       f'{len(relations["controls"])} control, {len(relations["connects"])} connection, '
+                       f'{len(exposed_pairs)} exposed facts',
             'entities': entities
         }), 200
 
