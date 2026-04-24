@@ -18,6 +18,7 @@ spec:
       containers:
         - name: attack-threat-modeling
           image: registry.intra.miranda.onesource.pt/miranda/attack-threat-modeling/attack-threat-modeling:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 5001
           env:
