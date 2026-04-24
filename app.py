@@ -436,9 +436,7 @@ def _matches_ctxd_schema(raw_bytes):
 def _fetch_latest_kafka_message(brokers, topic, timeout_ms=15000):
     consumer = KafkaConsumer(
         bootstrap_servers=brokers,
-        security_protocol='SSL',
-        ssl_check_hostname=False,
-        ssl_cafile=None,
+        security_protocol='PLAINTEXT',
         consumer_timeout_ms=timeout_ms,
         auto_offset_reset='earliest',
         enable_auto_commit=False,
