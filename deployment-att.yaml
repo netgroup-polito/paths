@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attack-threat-modeling
+  namespace: polito
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: attack-threat-modeling
+  template:
+    metadata:
+      labels:
+        app: attack-threat-modeling
+    spec:
+      imagePullSecrets:
+        - name: gitlab-registry-secret
+      containers:
+        - name: attack-threat-modeling
+          image: registry.intra.miranda.onesource.pt/miranda/attack-threat-modeling/attack-threat-modeling:latest
+          ports:
+            - containerPort: 5001
+          env:
+            - name: FLASK_APP
+              value: app.py
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: attack-threat-modeling
+  namespace: polito
+spec:
+  selector:
+    app: attack-threat-modeling
+  ports:
+    - protocol: TCP
+      port: 5001
+      targetPort: 5001
+      nodePort: 30501
+  type: NodePort

@@ -409,13 +409,13 @@ def upload_files():
 
 
 KAFKA_BROKERS = [
-    'kafka-broker-0.intra.miranda.onesource.pt:9093',
-    'kafka-broker-1.intra.miranda.onesource.pt:9093',
-    'kafka-broker-2.intra.miranda.onesource.pt:9093',
+    'kafka-broker-0.sph.svc.cluster.local:9092',
+    'kafka-broker-1.sph.svc.cluster.local:9092',
+    'kafka-broker-2.sph.svc.cluster.local:9092',
 ]
 KAFKA_TOPIC = 'ctxd'
 KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'schemas', 'ctxd-v2.0.json')
-KAFKA_LOOKBACK = 200  # max messages to scan backwards per partition
+KAFKA_LOOKBACK = 5  # max messages to scan backwards per partition
 
 with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:
     _CTXD_SCHEMA = json.load(_f)
