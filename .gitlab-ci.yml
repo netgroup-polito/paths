@@ -44,6 +44,7 @@ build-and-push:
         }
       }
       EOF
+    - cat /kaniko/.docker/config.json
     - >
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
