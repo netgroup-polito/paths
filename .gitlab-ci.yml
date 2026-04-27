@@ -28,6 +28,7 @@ build-and-push:
     entrypoint: [""]
   script:
     - echo "Building Attack Threat Modeling image with Kaniko..."
+    - cat $DOCKER_AUTH_CONFIG && echo "Auth config found" || echo "Auth config NOT available"
     - >
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
