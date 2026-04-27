@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM registry.intra.miranda.onesource.pt/miranda/attack-threat-modeling/python:3.11-slim
 
 WORKDIR /app
 
