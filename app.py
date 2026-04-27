@@ -7,6 +7,7 @@ import base64
 import tempfile
 import shutil
 import atexit
+import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'parser'))
 from parser import build_name_registry, collect_entities, process_links, write_prolog, collect_vulnerabilities
@@ -415,6 +416,7 @@ KAFKA_BROKERS = [
 ]
 KAFKA_TOPIC = 'ctxd'
 KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'schemas', 'ctxd-v2.0.json')
+THREAT_CORRELATOR_URL = 'https://threat-correlator.intra.miranda.onesource.pt'
 KAFKA_LOOKBACK = 5  # max messages to scan backwards per partition
 
 with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:
@@ -490,47 +492,66 @@ def fetch_kafka():
         return '', 200
 
     try:
-        data = _fetch_latest_kafka_message(KAFKA_BROKERS, KAFKA_TOPIC)
+        scg = _fetch_latest_kafka_message(KAFKA_BROKERS, KAFKA_TOPIC)
     except Exception as e:
         return jsonify({'success': False, 'message': f'Kafka error: {str(e)}'}), 502
 
+    return jsonify({'success': True, 'scg': scg}), 200
+
+
+@app.route('/api/enrich-scg', methods=['POST', 'OPTIONS'])
+def enrich_scg():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    scg = request.get_json(silent=True)
+    if not scg:
+        return jsonify({'success': False, 'message': 'Request body must be a JSON SCG'}), 400
+
+    creator = scg.get('creator')
+    if not creator:
+        return jsonify({'success': False, 'message': 'SCG missing creator field'}), 400
+
+    # Step 1: retrieve existing graph_ids from Threat Correlator
     try:
-        services = data.get('services', [])
-        links = data.get('links', [])
-        service_vulns = data.get('service_vulnerabilities', [])
-
-        registry = build_name_registry(services, links)
-        entity_ids, _ = collect_entities(services, registry)
-        relations = process_links(links, registry)
-        vulnerabilities, exposed_pairs = collect_vulnerabilities(service_vulns, registry)
-
-        temp_dir = app.config['TEMP_UPLOAD_DIR']
-        prolog_path = os.path.join(temp_dir, 'kafka_ctxd.p')
-
-        with open(prolog_path, 'w', encoding='utf-8') as out:
-            write_prolog(out, f'kafka://{KAFKA_TOPIC}', entity_ids, relations,
-                         load_rule=False, vulnerabilities=vulnerabilities,
-                         exposed_pairs=exposed_pairs)
-
-        fill_prolog_file(prolog_path, prolog_path)
-
-        success, message = analyzer.initialize(prolog_path)
-        if not success:
-            return jsonify({'success': False, 'message': message}), 400
-
-        entities = analyzer.get_entities()
-        return jsonify({
-            'success': True,
-            'message': f'Fetched from Kafka — {len(entity_ids)} entities, '
-                       f'{len(relations["contains"])} containment, '
-                       f'{len(relations["controls"])} control, '
-                       f'{len(relations["connects"])} connection, '
-                       f'{len(exposed_pairs)} exposed facts',
-            'entities': entities
-        }), 200
-
+        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graphs', timeout=30)
+        resp.raise_for_status()
+        graph_ids = [g['graph_id'] for g in resp.json().get('graphs', [])]
     except Exception as e:
-        return jsonify({'success': False, 'message': f'Parse error: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': f'Threat Correlator error (list graphs): {str(e)}'}), 502
+
+    graph_id = creator
+
+    if creator not in graph_ids:
+        # Step 2: ingest SCG
+        try:
+            resp = requests.post(f'{THREAT_CORRELATOR_URL}/neo4j/graphs', json=scg, timeout=60)
+            resp.raise_for_status()
+            graph_id = resp.json()['graph_id']
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Threat Correlator error (ingest): {str(e)}'}), 502
+
+        # Step 3: trigger vulnerability enrichment
+        try:
+            resp = requests.post(
+                f'{THREAT_CORRELATOR_URL}/events/graph',
+                json={'event': 'graph.updated', 'graph_id': graph_id},
+                timeout=120
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Threat Correlator error (enrich): {str(e)}'}), 502
+
+    # Step 4: retrieve enriched SCG
+    try:
+        # TODO: GET /api/... — replace with exact endpoint to retrieve enriched SCG by graph_id
+        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{graph_id}/vulnerabilities', timeout=30)
+        resp.raise_for_status()
+        enriched_scg = resp.json()
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Threat Correlator error (retrieve): {str(e)}'}), 502
+
+    return jsonify({'success': True, 'scg': enriched_scg}), 200
 
 
 @app.route('/api/parse-json', methods=['POST', 'OPTIONS'])

@@ -348,43 +348,59 @@ async function handleKafkaFetch() {
     const kafkaBtn = document.getElementById('kafka_btn');
     if (kafkaBtn) kafkaBtn.disabled = true;
 
-    showLoading('upload_status', 'Connecting to Kafka and fetching latest SCG…');
     _resetUI();
 
     try {
-        const response = await fetch('/api/fetch-kafka', { method: 'POST' });
-        const result = await response.json();
-
-        if (!result.success) {
-            showStatus('upload_status', `Error: ${result.message}`, 'error');
+        // Step 1: fetch raw SCG from Kafka
+        showLoading('upload_status', 'Connecting to Kafka and fetching latest SCG…');
+        const fetchResponse = await fetch('/api/fetch-kafka', { method: 'POST' });
+        const fetchResult = await fetchResponse.json();
+        if (!fetchResult.success) {
+            showStatus('upload_status', `Kafka error: ${fetchResult.message}`, 'error');
             return;
         }
 
-        showLoading('upload_status', `${result.message} — Running inference…`);
-        allFacts = result.entities || [];
+        // Step 2: enrich SCG with vulnerability data via Threat Correlator
+        showLoading('upload_status', 'Enriching SCG with vulnerability data…');
+        const enrichResponse = await fetch('/api/enrich-scg', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fetchResult.scg)
+        });
+        const enrichResult = await enrichResponse.json();
+        if (!enrichResult.success) {
+            showStatus('upload_status', `Enrichment error: ${enrichResult.message}`, 'error');
+            return;
+        }
 
+        // Step 3: parse enriched SCG into Prolog facts
+        showLoading('upload_status', 'Parsing enriched SCG…');
+        const formData = new FormData();
+        const scgBlob = new Blob([JSON.stringify(enrichResult.scg)], { type: 'application/json' });
+        formData.append('json_file', scgBlob, 'kafka_enriched.json');
+        const parseResponse = await fetch('/api/parse-json', { method: 'POST', body: formData });
+        const parseResult = await parseResponse.json();
+        if (!parseResult.success) {
+            showStatus('upload_status', `Parse error: ${parseResult.message}`, 'error');
+            return;
+        }
+
+        // Step 4: run inference
+        showLoading('upload_status', `${parseResult.message} — Running inference…`);
         const inferenceResponse = await fetch('/api/run-inference', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ trace: false })
         });
-
-        if (!inferenceResponse.ok) {
-            const errorData = await inferenceResponse.json();
-            showStatus('upload_status', `Inference failed: ${errorData.message || 'Unknown error'}`, 'error');
-            return;
-        }
-
         const inferenceResult = await inferenceResponse.json();
-
         if (!inferenceResult.success) {
             showStatus('upload_status', `Inference error: ${inferenceResult.message}`, 'error');
             return;
         }
 
+        // Step 5: load facts and switch to main view
         const factsResponse = await fetch('/api/facts-list');
         const factsData = await factsResponse.json();
-
         if (factsData.success) {
             _populateFactLists(factsData);
             setTimeout(() => {
