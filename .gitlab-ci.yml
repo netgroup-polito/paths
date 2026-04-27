@@ -28,7 +28,22 @@ build-and-push:
     entrypoint: [""]
   script:
     - echo "Building Attack Threat Modeling image with Kaniko..."
-    - cat $DOCKER_AUTH_CONFIG && echo "Auth config found" || echo "Auth config NOT available"
+    - mkdir -p /kaniko/.docker
+    - |
+      cat > /kaniko/.docker/config.json << EOF
+      {
+        "auths": {
+          "https://index.docker.io/v1/": {
+            "username": "$DOCKERHUB_USERNAME",
+            "password": "$DOCKERHUB_TOKEN"
+          },
+          "registry.gitlab.com": {
+            "username": "gitlab-ci-token",
+            "password": "$CI_JOB_TOKEN"
+          }
+        }
+      }
+      EOF
     - >
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
