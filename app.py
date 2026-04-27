@@ -7,6 +7,7 @@ import base64
 import tempfile
 import shutil
 import atexit
+import time
 import requests
 from urllib.parse import quote
 
@@ -534,6 +535,7 @@ def enrich_scg():
 
         # Step 3: trigger vulnerability enrichment
         try:
+            time.sleep(15)
             resp = requests.post(
                 f'{THREAT_CORRELATOR_URL}/events/graph',
                 json={'event': 'graph.updated', 'graph_id': graph_id},
