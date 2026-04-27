@@ -524,29 +524,30 @@ def enrich_scg():
 
     graph_id = creator
 
-    if creator not in graph_ids:
-        # Step 2: ingest SCG
-        try:
-            resp = requests.post(f'{THREAT_CORRELATOR_URL}/neo4j/ingest', json=scg, timeout=60)
-            resp.raise_for_status()
-            graph_id = resp.json()['graph_id']
-        except Exception as e:
-            return jsonify({'success': False, 'message': f'Threat Correlator error (ingest): {str(e)}'}), 502
+    #if creator not in graph_ids:
 
-        # Step 3: trigger vulnerability enrichment
-        try:
-            time.sleep(15)
-            resp = requests.post(
-                f'{THREAT_CORRELATOR_URL}/events/graph',
-                json={'event': 'graph.updated', 'graph_id': graph_id},
-                timeout=120
-            )
-            resp.raise_for_status()
-        except Exception as e:
-            return jsonify({'success': False, 'message': f'Threat Correlator error (enrich): {str(e)}'}), 502
+    # Step 2: ingest SCG
+    try:
+        resp = requests.post(f'{THREAT_CORRELATOR_URL}/neo4j/ingest', json=scg, timeout=60)
+        resp.raise_for_status()
+        graph_id = resp.json()['graph_id']
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Threat Correlator error (ingest): {str(e)}'}), 502
+
+    # Step 3: trigger vulnerability enrichment
+    try:
+        resp = requests.post(
+            f'{THREAT_CORRELATOR_URL}/events/graph',
+            json={'event': 'graph.updated', 'graph_id': graph_id},
+            timeout=120
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Threat Correlator error (enrich): {str(e)}'}), 502
 
     # Step 4: retrieve enriched SCG
     try:
+        time.sleep(15)
         resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{quote(graph_id, safe="")}/vulnerabilities', timeout=60)
         resp.raise_for_status()
         enriched_scg = resp.json()
