@@ -525,7 +525,7 @@ def enrich_scg():
     if creator not in graph_ids:
         # Step 2: ingest SCG
         try:
-            resp = requests.post(f'{THREAT_CORRELATOR_URL}/neo4j/graphs', json=scg, timeout=60)
+            resp = requests.post(f'{THREAT_CORRELATOR_URL}/neo4j/ingest', json=scg, timeout=60)
             resp.raise_for_status()
             graph_id = resp.json()['graph_id']
         except Exception as e:
@@ -545,7 +545,7 @@ def enrich_scg():
     # Step 4: retrieve enriched SCG
     try:
         # TODO: GET /api/... — replace with exact endpoint to retrieve enriched SCG by graph_id
-        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{graph_id}/vulnerabilities', timeout=30)
+        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{graph_id}/vulnerabilities', timeout=60)
         resp.raise_for_status()
         enriched_scg = resp.json()
     except Exception as e:
