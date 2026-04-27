@@ -29,13 +29,13 @@ build-and-push:
   script:
     - echo "Building Attack Threat Modeling image with Kaniko..."
     - mkdir -p /kaniko/.docker
+    - AUTH=$(echo -n "$DOCKERHUB_USERNAME:$DOCKERHUB_TOKEN" | base64 -w 0)
     - |
       cat > /kaniko/.docker/config.json << EOF
       {
         "auths": {
           "https://index.docker.io/v1/": {
-            "username": "$DOCKERHUB_USERNAME",
-            "password": "$DOCKERHUB_TOKEN"
+            "auth": "$AUTH"
           },
           "registry.gitlab.com": {
             "username": "gitlab-ci-token",
@@ -44,7 +44,6 @@ build-and-push:
         }
       }
       EOF
-    - cat /kaniko/.docker/config.json
     - >
       /kaniko/executor
       --context "$CI_PROJECT_DIR"
