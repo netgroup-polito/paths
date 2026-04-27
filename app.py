@@ -8,6 +8,7 @@ import tempfile
 import shutil
 import atexit
 import requests
+from urllib.parse import quote
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'parser'))
 from parser import build_name_registry, collect_entities, process_links, write_prolog, collect_vulnerabilities
@@ -544,8 +545,7 @@ def enrich_scg():
 
     # Step 4: retrieve enriched SCG
     try:
-        # TODO: GET /api/... — replace with exact endpoint to retrieve enriched SCG by graph_id
-        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{graph_id}/vulnerabilities', timeout=60)
+        resp = requests.get(f'{THREAT_CORRELATOR_URL}/neo4j/graph/{quote(graph_id, safe="")}/vulnerabilities', timeout=60)
         resp.raise_for_status()
         enriched_scg = resp.json()
     except Exception as e:
