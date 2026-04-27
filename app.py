@@ -416,7 +416,7 @@ KAFKA_BROKERS = [
 ]
 KAFKA_TOPIC = 'ctxd'
 KAFKA_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'schemas', 'ctxd-v2.0.json')
-THREAT_CORRELATOR_URL = 'https://threat-correlator.intra.miranda.onesource.pt'
+THREAT_CORRELATOR_URL = 'http://threat-correlator.intra.miranda.onesource.pt'
 KAFKA_LOOKBACK = 5  # max messages to scan backwards per partition
 
 with open(KAFKA_SCHEMA_PATH, encoding='utf-8') as _f:
