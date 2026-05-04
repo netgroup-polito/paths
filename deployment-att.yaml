@@ -46,6 +46,8 @@ kind: Ingress
 metadata:
   name: attack-threat-modeling
   namespace: polito
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
 spec:
   ingressClassName: nginx
   rules:
